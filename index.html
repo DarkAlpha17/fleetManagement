@@ -852,6 +852,7 @@ dialog .row{display:flex;justify-content:flex-end;gap:9px;margin-top:20px}
 #cfg .frm{grid-template-columns:92px minmax(0,1fr);margin-bottom:0}
 #cfg .hint{grid-column:2;margin-top:-4px;font-size:12px}
 #cfg .hint code{font:11.5px var(--mono);background:var(--panel2);border:1px solid var(--line2);border-radius:4px;padding:0 4px}
+#cfg .frm label.chk{grid-column:2;justify-content:flex-start;text-align:left;color:var(--dim);font-size:13px}
 .cfg-msg{margin-top:14px;padding:10px 12px;border-radius:var(--r);font-size:12.5px;line-height:1.5;border:1px solid var(--line);background:var(--panel2);color:var(--dim)}
 .cfg-msg.ok{color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)}
 .cfg-msg.bad{color:var(--bad);background:var(--bad-bg);border-color:var(--bad-line)}
@@ -1563,7 +1564,7 @@ Use ▤ Files to list, view or download the log files stored in /ext/logs on the
     <label for="f-scheme">scheme</label><select id="f-scheme"><option>ws://</option><option>wss://</option></select>
     <label for="f-host">host</label><input id="f-host" placeholder="mqtt.yourdomain.com">
     <label for="f-port">ws port</label><input id="f-port" inputmode="numeric" placeholder="9001">
-    <div class="hint">The broker's WebSocket listener (Mosquitto <code>listener … / protocol websockets</code>), not the 1883/8883 TCP port. Pages opened over https:// must use wss://.</div>
+    <div class="hint">The broker's WebSocket listener (Mosquitto <code>listener … / protocol websockets</code>), not the 1883/8883 TCP port. Pages opened over https:// (GitHub Pages) can only use wss://.</div>
     <label for="f-path">path</label><input id="f-path" placeholder="(blank for mosquitto)">
     <label for="f-user">username</label><input id="f-user" placeholder="(blank if anonymous)" autocomplete="username">
     <label for="f-pass">password</label><input id="f-pass" type="password" placeholder="(blank if anonymous)" autocomplete="current-password">
@@ -1872,10 +1873,11 @@ function disconnect(){
 function connect(){
   const c=readConn(), pass=$('f-pass').value;
   if(!c.host){ setConn('off','host required'); cfgMsg('bad','Enter the broker host, e.g. <b>mqtt.yourdomain.com</b> or an IP address.'); openCfg(); return false; }
-  if(location.protocol==='https:' && c.scheme==='ws://'){
-    setConn('off','use wss:// on an https page');
-    cfgMsg('bad','This page is opened over <b>https://</b>, so the browser blocks plain <b>ws://</b>. Choose <b>wss://</b> and the broker\'s secure WebSocket port (443 behind Caddy), or open the dashboard over http://.');
-    feed('bad','—','https page: switch the broker scheme to wss://'); openCfg(); return false; }
+  const httpsWs = location.protocol==='https:' && c.scheme==='ws://';   // browsers block this unless "Insecure content" is allowed for the site
+  const httpsHelp = 'This page is on <b>https://</b> (e.g. GitHub Pages) and browsers block plain <b>ws://</b> from https pages. Options: '+
+    '<b>1)</b> open the dashboard file directly from your computer (double-click it), '+
+    '<b>2)</b> serve it over <b>http://</b> instead of GitHub Pages, or '+
+    '<b>3)</b> reach the broker through an HTTPS tunnel (e.g. Cloudflare Tunnel) and use its <b>wss://</b> address, port 443.';
   if(typeof mqtt==='undefined'){
     setConn('off','MQTT library not loaded');
     cfgMsg('bad','The MQTT library did not load, so the dashboard cannot connect. It comes from <b>unpkg.com</b>: check this computer\'s internet access (or a firewall blocking that site) and reload the page.');
@@ -1891,7 +1893,8 @@ function connect(){
     ? `Check the host and port, that the broker serves secure WebSockets there, and that its certificate is valid. With a self-signed certificate, open <a href="https://${esc(c.host)}:${esc(c.port)}" target="_blank" rel="noopener">https://${esc(c.host)}:${esc(c.port)}</a> once, accept the warning, then try again.`
     : `Check the host and port, that Mosquitto has a <b>websockets</b> listener on port ${esc(c.port)}, and that the port is open in the server firewall.`;
   try{ client=mqtt.connect(url,opts); }
-  catch(e){ setConn('off','error: '+e.message); cfgMsg('bad','Could not start the connection: '+esc(e.message)); openCfg(); return false; }
+  catch(e){ setConn('off',httpsWs?'ws:// blocked on https page':'error: '+e.message);
+    cfgMsg('bad',httpsWs?httpsHelp:'Could not start the connection: '+esc(e.message)); openCfg(); client=null; return false; }
   client.on('connect',()=>{
     everUp=true;
     setConn('on',url); $('btn-conn').textContent='Disconnect';
@@ -1911,7 +1914,7 @@ function connect(){
   client.on('close',()=>{
     setConn('off','disconnected'); refresh();
     if(!everUp && !failNoted){ failNoted=true;
-      cfgMsg('bad','Could not reach <b>'+esc(url)+'</b>. '+failHelp()+' Still retrying every few seconds.');
+      cfgMsg('bad', httpsWs ? httpsHelp : 'Could not reach <b>'+esc(url)+'</b>. '+failHelp()+' Still retrying every few seconds.');
       feed('bad','—','cannot reach '+url); }
   });
   client.on('error',e=>{
@@ -1921,7 +1924,7 @@ function connect(){
       failNoted=true;
       cfgMsg('bad','The broker refused the login (<b>'+esc(m)+'</b>). Check the username and password.'); openCfg();
       if(client){ client.end(true); client=null; $('btn-conn').textContent='Connect'; }
-    } else if(!everUp){ failNoted=true; cfgMsg('bad','Connection error: <b>'+esc(m)+'</b>. '+failHelp()); }
+    } else if(!everUp){ failNoted=true; cfgMsg('bad', httpsWs ? httpsHelp : 'Connection error: <b>'+esc(m)+'</b>. '+failHelp()); }
   });
   client.on('message',onMessage);
   return true;
