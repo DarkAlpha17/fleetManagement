@@ -851,6 +851,12 @@ dialog .body b{color:var(--ink)}
 dialog .row{display:flex;justify-content:flex-end;gap:9px;margin-top:20px}
 #cfg .frm{grid-template-columns:92px minmax(0,1fr);margin-bottom:0}
 #cfg .hint{grid-column:2;margin-top:-4px;font-size:12px}
+#cfg .hint code{font:11.5px var(--mono);background:var(--panel2);border:1px solid var(--line2);border-radius:4px;padding:0 4px}
+.cfg-msg{margin-top:14px;padding:10px 12px;border-radius:var(--r);font-size:12.5px;line-height:1.5;border:1px solid var(--line);background:var(--panel2);color:var(--dim)}
+.cfg-msg.ok{color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)}
+.cfg-msg.bad{color:var(--bad);background:var(--bad-bg);border-color:var(--bad-line)}
+.cfg-msg.wait{color:var(--info);background:var(--info-bg);border-color:var(--info-line)}
+.cfg-msg a{color:inherit;font-weight:600}
 #icondlg .irow{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line2)}
 #icondlg .irow:last-child{border-bottom:0}
 #icondlg .iprev{width:44px;height:44px;flex:none;display:flex;align-items:center;justify-content:center;
@@ -1095,7 +1101,7 @@ td.aname .mini-ic{vertical-align:middle;margin-right:10px}
       <h2>Push package</h2>
       <p class="lede">The agent downloads the zip, verifies the checksum, backs up the current generation via <b>.deploy_manifest</b>, extracts, and health-checks. A failed health check rolls itself back automatically.</p>
       <div class="frm">
-        <label for="dep-path">package url</label><input id="dep-path" placeholder="http://103.209.145.206:5000/telemetry_v0.03.zip">
+        <label for="dep-path">package url</label><input id="dep-path" placeholder="http://your-server:5000/telemetry_v0.03.zip">
         <label for="dep-ver">version</label><input id="dep-ver" placeholder="V0.03">
         <label for="dep-sum">sha256</label><input id="dep-sum" placeholder="optional — verified before extract">
       </div>
@@ -1128,7 +1134,7 @@ td.aname .mini-ic{vertical-align:middle;margin-right:10px}
         <label class="chk"><input type="checkbox" id="opt-reagent">restart agent</label>
       </div>
       <div class="envmeta" id="env-meta">Nothing read yet.</div>
-      <textarea id="env-editor" spellcheck="false" placeholder="MQTT_HOST=103.209.145.206&#10;MQTT_PORT=8883&#10;MQTT_TLS=false&#10;DEVICE_ID=1921681050"></textarea>
+      <textarea id="env-editor" spellcheck="false" placeholder="MQTT_HOST=your-broker-host&#10;MQTT_PORT=8883&#10;MQTT_TLS=false&#10;DEVICE_ID=1921681050"></textarea>
       <div class="row" style="margin-top:12px">
         <button class="btn primary" id="btn-pushenv" disabled>Push to device</button>
         <button class="btn" id="btn-pushenv-all" disabled>Push to all selected</button>
@@ -1555,13 +1561,15 @@ Use ▤ Files to list, view or download the log files stored in /ext/logs on the
   <h3>Broker connection</h3>
   <div class="frm">
     <label for="f-scheme">scheme</label><select id="f-scheme"><option>ws://</option><option>wss://</option></select>
-    <label for="f-host">host</label><input id="f-host" placeholder="103.209.145.206">
-    <label for="f-port">ws port</label><input id="f-port" placeholder="9001">
-    <div class="hint">WebSocket listener — not 1883/8883. Browsers can't speak raw TCP MQTT. If this page is opened over https://, use wss://.</div>
+    <label for="f-host">host</label><input id="f-host" placeholder="mqtt.yourdomain.com">
+    <label for="f-port">ws port</label><input id="f-port" inputmode="numeric" placeholder="9001">
+    <div class="hint">The broker's WebSocket listener (Mosquitto <code>listener … / protocol websockets</code>), not the 1883/8883 TCP port. Pages opened over https:// must use wss://.</div>
     <label for="f-path">path</label><input id="f-path" placeholder="(blank for mosquitto)">
     <label for="f-user">username</label><input id="f-user" placeholder="(blank if anonymous)" autocomplete="username">
-    <label for="f-pass">password</label><input id="f-pass" type="password" placeholder="(never stored)" autocomplete="current-password">
+    <label for="f-pass">password</label><input id="f-pass" type="password" placeholder="(blank if anonymous)" autocomplete="current-password">
+    <label class="chk" style="grid-column:2"><input type="checkbox" id="f-remember"> Remember password in this browser</label>
   </div>
+  <div class="cfg-msg" id="cfg-msg" role="status" hidden></div>
   <div class="row">
     <button class="btn" id="cfg-close">Close</button>
     <button class="btn primary" id="broker-save">Save &amp; connect</button>
@@ -1813,8 +1821,10 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', ()=>{
 (function prefill(){
   const s=store.get('conn',{}), qs=new URLSearchParams(location.search);
   const put=(id,v)=>{ if(v) $(id).value=v; };
-  put('f-host',s.host); put('f-port',s.port||'9001'); put('f-path',s.path); put('f-user',s.user);
   if(s.scheme) $('f-scheme').value=s.scheme;
+  put('f-host',s.host); put('f-port',s.port||defPort()); put('f-path',s.path); put('f-user',s.user);
+  if(s.remember){ $('f-remember').checked=true; put('f-pass',s.pass); }
+  portHint();
   fetch('fmc.env',{cache:'no-store'}).then(r=>r.ok?r.text():Promise.reject()).then(t=>{
     const env={};
     t.split('\n').forEach(l=>{ l=l.trim(); const i=l.indexOf('=');
@@ -1827,9 +1837,27 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', ()=>{
   ['host','port','path','user','pass'].forEach(k=>{ if(qs.has(k)) put('f-'+k,qs.get(k)); });
   if(qs.has('scheme')) $('f-scheme').value=qs.get('scheme');
 })();
-$('btn-cfg').addEventListener('click',()=> $('cfg').showModal());
+function defPort(){ return $('f-scheme').value==='wss://' ? '443' : '9001'; }
+function portHint(){ $('f-port').placeholder=defPort(); }
+$('f-scheme').addEventListener('change',()=>{
+  const p=$('f-port').value.trim();
+  if(!p || p==='9001' || p==='443') $('f-port').value=defPort();   // swap the obvious defaults, keep custom ports
+  portHint(); cfgMsg('','');
+});
+function cfgMsg(kind,html){ const m=$('cfg-msg'); m.className='cfg-msg '+(kind||''); m.innerHTML=html||''; m.hidden=!html; }
+function readConn(){ return {scheme:$('f-scheme').value, host:$('f-host').value.trim().replace(/^(wss?|https?):\/\//i,'').replace(/\/+$/,''),
+  port:$('f-port').value.trim()||defPort(), path:$('f-path').value.trim(), user:$('f-user').value.trim(), remember:$('f-remember').checked}; }
+function saveConn(){ const c=readConn();
+  store.set('conn',Object.assign({},c,c.remember?{pass:$('f-pass').value}:{}));
+  $('f-host').value=c.host; return c; }
+function openCfg(){ if(!$('cfg').open) $('cfg').showModal(); }
+$('btn-cfg').addEventListener('click',()=>{ cfgMsg(client&&client.connected?'ok':'', client&&client.connected?'Connected to <b>'+esc($('conn-state').textContent)+'</b>.':''); openCfg(); });
 $('cfg-close').addEventListener('click',()=> $('cfg').close());
-$('broker-save').addEventListener('click',()=>{ $('cfg').close(); if(client) disconnect(); connect(); });
+$('broker-save').addEventListener('click',()=>{
+  saveConn();
+  if(client) disconnect();
+  if(connect()) cfgMsg('wait','Connecting…');
+});
 
 /* ===== connection ===== */
 function setConn(state,txt){
@@ -1842,24 +1870,33 @@ function disconnect(){
   setConn('off','not connected'); $('btn-conn').textContent='Connect'; refresh();
 }
 function connect(){
-  const scheme=$('f-scheme').value, host=$('f-host').value.trim(),
-        port=$('f-port').value.trim()||'9001', path=$('f-path').value.trim(),
-        user=$('f-user').value.trim(), pass=$('f-pass').value;
-  if(!host){ setConn('off','host required'); $('cfg').showModal(); return; }
-  if(location.protocol==='https:' && scheme==='ws://'){
+  const c=readConn(), pass=$('f-pass').value;
+  if(!c.host){ setConn('off','host required'); cfgMsg('bad','Enter the broker host, e.g. <b>mqtt.yourdomain.com</b> or an IP address.'); openCfg(); return false; }
+  if(location.protocol==='https:' && c.scheme==='ws://'){
     setConn('off','use wss:// on an https page');
-    feed('bad','—','This page is served over HTTPS, so the browser blocks plain ws:// connections. '+
-      'Pick wss:// in Broker settings (needs a TLS certificate on the broker), or open the dashboard over http://.');
-    $('cfg').showModal(); return; }
-  store.set('conn',{scheme,host,port,path,user});
-  const url=scheme+host+':'+port+(path?('/'+path.replace(/^\//,'')):'');
+    cfgMsg('bad','This page is opened over <b>https://</b>, so the browser blocks plain <b>ws://</b>. Choose <b>wss://</b> and the broker\'s secure WebSocket port (443 behind Caddy), or open the dashboard over http://.');
+    feed('bad','—','https page: switch the broker scheme to wss://'); openCfg(); return false; }
+  if(typeof mqtt==='undefined'){
+    setConn('off','MQTT library not loaded');
+    cfgMsg('bad','The MQTT library did not load, so the dashboard cannot connect. It comes from <b>unpkg.com</b>: check this computer\'s internet access (or a firewall blocking that site) and reload the page.');
+    feed('bad','—','MQTT library (unpkg.com) failed to load'); openCfg(); return false; }
+  saveConn();
+  const url=c.scheme+c.host+':'+c.port+(c.path?('/'+c.path.replace(/^\//,'')):'');
   setConn('wait','connecting '+url);
   const opts={clientId:'fleetdeploy_'+Math.random().toString(16).slice(2,8),
               keepalive:30, reconnectPeriod:4000, connectTimeout:8000};
-  if(user){ opts.username=user; if(pass) opts.password=pass; }
-  client=mqtt.connect(url,opts);
+  if(c.user){ opts.username=c.user; if(pass) opts.password=pass; }
+  let everUp=false, failNoted=false;
+  const failHelp=()=> c.scheme==='wss://'
+    ? `Check the host and port, that the broker serves secure WebSockets there, and that its certificate is valid. With a self-signed certificate, open <a href="https://${esc(c.host)}:${esc(c.port)}" target="_blank" rel="noopener">https://${esc(c.host)}:${esc(c.port)}</a> once, accept the warning, then try again.`
+    : `Check the host and port, that Mosquitto has a <b>websockets</b> listener on port ${esc(c.port)}, and that the port is open in the server firewall.`;
+  try{ client=mqtt.connect(url,opts); }
+  catch(e){ setConn('off','error: '+e.message); cfgMsg('bad','Could not start the connection: '+esc(e.message)); openCfg(); return false; }
   client.on('connect',()=>{
+    everUp=true;
     setConn('on',url); $('btn-conn').textContent='Disconnect';
+    cfgMsg('ok','Connected to <b>'+esc(url)+'</b>. Settings saved.');
+    if($('cfg').open) setTimeout(()=>{ if(client&&client.connected) $('cfg').close(); },900);
     client.subscribe([HEARTBEAT_TOPIC,DEPLOY_TOPIC,ENV_WILDCARD,ROVER_TOPIC,AVL_TOPIC,TRIP_TOPIC],{qos:1});
     feed('sys','—','subscribed: heartbeats, deploy status, env, rover GPS, AVL data, trip details');
     if(logActive && logDevice){
@@ -1871,9 +1908,23 @@ function connect(){
     refresh();
   });
   client.on('reconnect',()=> setConn('wait','reconnecting …'));
-  client.on('close',()=>{ setConn('off','disconnected'); refresh(); });
-  client.on('error',e=>{ setConn('off','error: '+e.message); feed('bad','—','mqtt error: '+e.message); });
+  client.on('close',()=>{
+    setConn('off','disconnected'); refresh();
+    if(!everUp && !failNoted){ failNoted=true;
+      cfgMsg('bad','Could not reach <b>'+esc(url)+'</b>. '+failHelp()+' Still retrying every few seconds.');
+      feed('bad','—','cannot reach '+url); }
+  });
+  client.on('error',e=>{
+    const m=String(e&&e.message||e);
+    setConn('off','error: '+m); feed('bad','—','mqtt error: '+m);
+    if(/not authori[sz]ed|bad user|password|connack.*(4|5)/i.test(m)){
+      failNoted=true;
+      cfgMsg('bad','The broker refused the login (<b>'+esc(m)+'</b>). Check the username and password.'); openCfg();
+      if(client){ client.end(true); client=null; $('btn-conn').textContent='Connect'; }
+    } else if(!everUp){ failNoted=true; cfgMsg('bad','Connection error: <b>'+esc(m)+'</b>. '+failHelp()); }
+  });
   client.on('message',onMessage);
+  return true;
 }
 $('btn-conn').addEventListener('click',()=> client ? disconnect() : connect());
 
